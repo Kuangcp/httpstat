@@ -28,22 +28,22 @@ import (
 const (
 	httpsTemplate = `` +
 		`  DNS Lookup   TCP Connection   TLS Handshake   Server Processing   Content Transfer` + "\n" +
-		`[%s  |     %s  |    %s  |        %s  |       %s  ]` + "\n" +
-		`            |                |               |                   |                  |` + "\n" +
-		`   namelookup:%s      |               |                   |                  |` + "\n" +
-		`                       connect:%s     |                   |                  |` + "\n" +
-		`                                   pretransfer:%s         |                  |` + "\n" +
-		`                                                     starttransfer:%s        |` + "\n" +
-		`                                                                                total:%s` + "\n"
+		`[%s  ┃     %s  ┃    %s  ┃        %s  ┃       %s  ]` + "\n" +
+		`            ┃                ┃               ┃                   ┃                  ┃` + "\n" +
+		`  namelookup:%s       ┃               ┃                   ┃                  ┃` + "\n" +
+		`                      connect:%s      ┃                   ┃                  ┃` + "\n" +
+		`                                  pretransfer:%s          ┃                  ┃` + "\n" +
+		`                                                    starttransfer:%s         ┃` + "\n" +
+		`                                                                               total:%s` + "\n"
 
 	httpTemplate = `` +
 		`   DNS Lookup   TCP Connection   Server Processing   Content Transfer` + "\n" +
-		`[ %s  |     %s  |        %s  |       %s  ]` + "\n" +
-		`             |                |                   |                  |` + "\n" +
-		`    namelookup:%s      |                   |                  |` + "\n" +
-		`                        connect:%s         |                  |` + "\n" +
-		`                                      starttransfer:%s        |` + "\n" +
-		`                                                                 total:%s` + "\n"
+		`[ %s  ┃     %s  ┃        %s  ┃       %s  ]` + "\n" +
+		`             ┃                ┃                   ┃                  ┃` + "\n" +
+		`   namelookup:%s       ┃                   ┃                  ┃` + "\n" +
+		`                       connect:%s          ┃                  ┃` + "\n" +
+		`                                     starttransfer:%s         ┃` + "\n" +
+		`                                                                total:%s` + "\n"
 )
 
 var (
@@ -299,13 +299,49 @@ func visit(url *url.URL) {
 	}
 
 	// print status line and headers
-	printf("\n%s%s%s\n", color.GreenString("HTTP"), grayscale(14)("/"), color.CyanString("%d.%d %s", resp.ProtoMajor, resp.ProtoMinor, resp.Status))
+	printf("\n%s%s%s\n", color.GreenString("HTTP"), grayscale(14)("/"),
+		color.CyanString("%d.%d %s", resp.ProtoMajor, resp.ProtoMinor, resp.Status))
 
 	names := make([]string, 0, len(resp.Header))
 	for k := range resp.Header {
 		names = append(names, k)
 	}
-	sort.Sort(headers(names))
+	reqHeaders := headers(names)
+	sort.Slice(reqHeaders, func(i, j int) bool {
+		a, b := reqHeaders[i], reqHeaders[j]
+
+		// server always sorts at the top
+		if a == "Server" {
+			return true
+		}
+		if b == "Server" {
+			return false
+		}
+
+		endtoend := func(n string) bool {
+			// https://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html#sec13.5.1
+			switch n {
+			case "Connection",
+				"Keep-Alive",
+				"Proxy-Authenticate",
+				"Proxy-Authorization",
+				"TE",
+				"Trailers",
+				"Transfer-Encoding",
+				"Upgrade":
+				return false
+			default:
+				return true
+			}
+		}
+
+		x, y := endtoend(a), endtoend(b)
+		if x == y {
+			// both are of the same class
+			return a < b
+		}
+		return x
+	})
 	for _, k := range names {
 		printf("%s %s\n", grayscale(14)(k+":"), color.CyanString(strings.Join(resp.Header[k], ",")))
 	}
@@ -314,11 +350,11 @@ func visit(url *url.URL) {
 		printf("\n%s\n", bodyMsg)
 	}
 
-	fmta := func(d time.Duration) string {
+	blockFmt := func(d time.Duration) string {
 		return color.CyanString("%7dms", int(d/time.Millisecond))
 	}
 
-	fmtb := func(d time.Duration) string {
+	flagFmt := func(d time.Duration) string {
 		return color.CyanString("%-9s", strconv.Itoa(int(d/time.Millisecond))+"ms")
 	}
 
@@ -333,27 +369,29 @@ func visit(url *url.URL) {
 	switch url.Scheme {
 	case "https":
 		printf(colorize(httpsTemplate),
-			fmta(t1.Sub(t0)), // dns lookup
-			fmta(t2.Sub(t1)), // tcp connection
-			fmta(t6.Sub(t5)), // tls handshake
-			fmta(t4.Sub(t3)), // server processing
-			fmta(t7.Sub(t4)), // content transfer
-			fmtb(t1.Sub(t0)), // namelookup
-			fmtb(t2.Sub(t0)), // connect
-			fmtb(t3.Sub(t0)), // pretransfer
-			fmtb(t4.Sub(t0)), // starttransfer
-			fmtb(t7.Sub(t0)), // total
+			blockFmt(t1.Sub(t0)), // dns lookup
+			blockFmt(t2.Sub(t1)), // tcp connection
+			blockFmt(t6.Sub(t5)), // tls handshake
+			blockFmt(t4.Sub(t3)), // server processing
+			blockFmt(t7.Sub(t4)), // content transfer
+
+			flagFmt(t1.Sub(t0)), // namelookup
+			flagFmt(t2.Sub(t0)), // connect
+			flagFmt(t3.Sub(t0)), // pretransfer
+			flagFmt(t4.Sub(t0)), // starttransfer
+			flagFmt(t7.Sub(t0)), // total
 		)
 	case "http":
 		printf(colorize(httpTemplate),
-			fmta(t1.Sub(t0)), // dns lookup
-			fmta(t3.Sub(t1)), // tcp connection
-			fmta(t4.Sub(t3)), // server processing
-			fmta(t7.Sub(t4)), // content transfer
-			fmtb(t1.Sub(t0)), // namelookup
-			fmtb(t3.Sub(t0)), // connect
-			fmtb(t4.Sub(t0)), // starttransfer
-			fmtb(t7.Sub(t0)), // total
+			blockFmt(t1.Sub(t0)), // dns lookup
+			blockFmt(t3.Sub(t1)), // tcp connection
+			blockFmt(t4.Sub(t3)), // server processing
+			blockFmt(t7.Sub(t4)), // content transfer
+
+			flagFmt(t1.Sub(t0)), // namelookup
+			flagFmt(t3.Sub(t0)), // connect
+			flagFmt(t4.Sub(t0)), // starttransfer
+			flagFmt(t7.Sub(t0)), // total
 		)
 	}
 
@@ -486,42 +524,4 @@ func (h headers) String() string {
 func (h *headers) Set(v string) error {
 	*h = append(*h, v)
 	return nil
-}
-
-func (h headers) Len() int      { return len(h) }
-func (h headers) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h headers) Less(i, j int) bool {
-	a, b := h[i], h[j]
-
-	// server always sorts at the top
-	if a == "Server" {
-		return true
-	}
-	if b == "Server" {
-		return false
-	}
-
-	endtoend := func(n string) bool {
-		// https://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html#sec13.5.1
-		switch n {
-		case "Connection",
-			"Keep-Alive",
-			"Proxy-Authenticate",
-			"Proxy-Authorization",
-			"TE",
-			"Trailers",
-			"Transfer-Encoding",
-			"Upgrade":
-			return false
-		default:
-			return true
-		}
-	}
-
-	x, y := endtoend(a), endtoend(b)
-	if x == y {
-		// both are of the same class
-		return a < b
-	}
-	return x
 }
