@@ -1,6 +1,4 @@
-# httpstat [![Build Status](https://travis-ci.org/davecheney/httpstat.svg?branch=master)](https://travis-ci.org/davecheney/httpstat)
-
-[![Go Report Card](https://goreportcard.com/badge/github.com/davecheney/httpstat)](https://goreportcard.com/report/github.com/davecheney/httpstat)
+# httpstat [![Build Status](https://github.com/davecheney/httpstat/actions/workflows/push.yml/badge.svg)](https://github.com/davecheney/httpstat/actions/workflows/push.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/davecheney/httpstat)](https://goreportcard.com/report/github.com/davecheney/httpstat)
 
 ![Shameless](./screenshot.png)
 
@@ -11,8 +9,9 @@ But seriously, https://github.com/reorx/httpstat is the new hotness, and this is
 ## Installation
 `httpstat` requires Go 1.13 or later.
 ```
-$ go get github.com/davecheney/httpstat
-```	
+$ go install github.com/davecheney/httpstat@latest
+```
+
 ## Usage
 ```
 $ httpstat https://example.com/
