@@ -237,6 +237,7 @@ func visit(url *url.URL) {
 			}
 		},
 		ConnectDone: func(net, addr string, err error) {
+			// TODO print timeout, also print tree
 			if err != nil {
 				logger.Emer("unable to connect to host %v: %v", addr, err)
 				os.Exit(1)
