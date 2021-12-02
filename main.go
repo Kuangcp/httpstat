@@ -6,9 +6,9 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"github.com/kuangcp/logger"
 	"io"
 	"io/ioutil"
-	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -70,6 +70,8 @@ var (
 const maxRedirects = 10
 
 func init() {
+	logger.SetLogPathTrim("httpstat/")
+
 	flag.StringVar(&httpMethod, "X", "GET", "HTTP method to use")
 	flag.StringVar(&postBody, "d", "", "the body of a POST or PUT request; from file use @filename")
 	flag.BoolVar(&followRedirects, "L", false, "follow 30x redirects")
@@ -126,7 +128,7 @@ func main() {
 	}
 
 	if (httpMethod == "POST" || httpMethod == "PUT") && postBody == "" {
-		log.Fatal("must supply post body using -d when POST or PUT is used")
+		logger.Emer("must supply post body using -d when POST or PUT is used")
 	}
 
 	if onlyHeader {
@@ -152,7 +154,8 @@ func readClientCert(filename string) []tls.Certificate {
 	// read client certificate file (must include client private key and certificate)
 	certFileBytes, err := ioutil.ReadFile(clientCertFile)
 	if err != nil {
-		log.Fatalf("failed to read client certificate file: %v", err)
+		logger.Emer("failed to read client certificate file: ", err)
+		os.Exit(1)
 	}
 
 	for {
@@ -172,7 +175,8 @@ func readClientCert(filename string) []tls.Certificate {
 
 	cert, err := tls.X509KeyPair(certPem, pkeyPem)
 	if err != nil {
-		log.Fatalf("unable to load client cert and key pair: %v", err)
+		logger.Emer("unable to load client cert and key pair: ", err)
+		os.Exit(1)
 	}
 	return []tls.Certificate{cert}
 }
@@ -182,24 +186,26 @@ func parseURL(uri string) *url.URL {
 		uri = "//" + uri
 	}
 
-	url, err := url.Parse(uri)
+	parsedURL, err := url.Parse(uri)
 	if err != nil {
-		log.Fatalf("could not parse url %q: %v", uri, err)
+		logger.Emer("could not parse url %q: %v", uri, err)
+		os.Exit(1)
 	}
 
-	if url.Scheme == "" {
-		url.Scheme = "http"
-		if !strings.HasSuffix(url.Host, ":80") {
-			url.Scheme += "s"
+	if parsedURL.Scheme == "" {
+		parsedURL.Scheme = "http"
+		if !strings.HasSuffix(parsedURL.Host, ":80") {
+			parsedURL.Scheme += "s"
 		}
 	}
-	return url
+	return parsedURL
 }
 
 func headerKeyValue(h string) (string, string) {
 	i := strings.Index(h, ":")
 	if i == -1 {
-		log.Fatalf("Header '%s' has invalid format, missing ':'", h)
+		logger.Emer("Header '%s' has invalid format, missing ':'", h)
+		os.Exit(1)
 	}
 	return strings.TrimRight(h[:i], " "), strings.TrimLeft(h[i:], " :")
 }
@@ -232,7 +238,8 @@ func visit(url *url.URL) {
 		},
 		ConnectDone: func(net, addr string, err error) {
 			if err != nil {
-				log.Fatalf("unable to connect to host %v: %v", addr, err)
+				logger.Emer("unable to connect to host %v: %v", addr, err)
+				os.Exit(1)
 			}
 			t2 = time.Now()
 
@@ -286,7 +293,8 @@ func visit(url *url.URL) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("failed to read response: %v", err)
+		logger.Emer("failed to read response: %v", err)
+		os.Exit(1)
 	}
 
 	bodyMsg := readResponseBody(req, resp)
@@ -402,12 +410,14 @@ func visit(url *url.URL) {
 				// 30x but no Location to follow, give up.
 				return
 			}
-			log.Fatalf("unable to follow redirect: %v", err)
+			logger.Emer("unable to follow redirect: %v", err)
+			os.Exit(1)
 		}
 
 		redirectsFollowed++
 		if redirectsFollowed > maxRedirects {
-			log.Fatalf("maximum number of redirects (%d) followed", maxRedirects)
+			logger.Emer("maximum number of redirects (%d) followed", maxRedirects)
+			os.Exit(1)
 		}
 
 		visit(loc)
@@ -421,7 +431,8 @@ func isRedirect(resp *http.Response) bool {
 func newRequest(method string, url *url.URL, body string) *http.Request {
 	req, err := http.NewRequest(method, url.String(), createBody(body))
 	if err != nil {
-		log.Fatalf("unable to create request: %v", err)
+		logger.Emer("unable to create request: %v", err)
+		os.Exit(1)
 	}
 	for _, h := range httpHeaders {
 		k, v := headerKeyValue(h)
@@ -439,7 +450,8 @@ func createBody(body string) io.Reader {
 		filename := body[1:]
 		f, err := os.Open(filename)
 		if err != nil {
-			log.Fatalf("failed to open data file %s: %v", filename, err)
+			logger.Emer("failed to open data file %s: %v", filename, err)
+			os.Exit(1)
 		}
 		return f
 	}
@@ -491,13 +503,15 @@ func readResponseBody(req *http.Request, resp *http.Response) string {
 			}
 
 			if filename == "/" {
-				log.Fatalf("No remote filename; specify output filename with -o to save response body")
+				logger.Emer("No remote filename; specify output filename with -o to save response body")
+				os.Exit(1)
 			}
 		}
 
 		f, err := os.Create(filename)
 		if err != nil {
-			log.Fatalf("unable to create file %s: %v", filename, err)
+			logger.Emer("unable to create file %s: %v", filename, err)
+			os.Exit(1)
 		}
 		defer f.Close()
 		w = f
@@ -505,7 +519,8 @@ func readResponseBody(req *http.Request, resp *http.Response) string {
 	}
 
 	if _, err := io.Copy(w, resp.Body); err != nil && w != ioutil.Discard {
-		log.Fatalf("failed to read response body: %v", err)
+		logger.Emer("failed to read response body: %v", err)
+		os.Exit(1)
 	}
 
 	return msg
