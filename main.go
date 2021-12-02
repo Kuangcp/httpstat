@@ -152,7 +152,7 @@ func readClientCert(filename string) []tls.Certificate {
 	)
 
 	// read client certificate file (must include client private key and certificate)
-	certFileBytes, err := ioutil.ReadFile(clientCertFile)
+	certFileBytes, err := ioutil.ReadFile(filename)
 	if err != nil {
 		logger.Emer("failed to read client certificate file: ", err)
 		os.Exit(1)
@@ -280,6 +280,7 @@ func visit(url *url.URL) {
 			ServerName:         host,
 			InsecureSkipVerify: insecure,
 			Certificates:       readClientCert(clientCertFile),
+			MinVersion:         tls.VersionTLS12,
 		}
 	}
 
@@ -297,6 +298,18 @@ func visit(url *url.URL) {
 		logger.Emer("failed to read response: %v", err)
 		os.Exit(1)
 	}
+
+	// Print SSL/TLS version which is used for connection
+	connectedVia := "plaintext"
+	if resp.TLS != nil {
+		switch resp.TLS.Version {
+		case tls.VersionTLS12:
+			connectedVia = "TLSv1.2"
+		case tls.VersionTLS13:
+			connectedVia = "TLSv1.3"
+		}
+	}
+	printf("\n%s %s\n", color.GreenString("Connected via"), color.CyanString("%s", connectedVia))
 
 	bodyMsg := readResponseBody(req, resp)
 	resp.Body.Close()
