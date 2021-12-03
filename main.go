@@ -6,7 +6,6 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"github.com/kuangcp/logger"
 	"io"
 	"io/ioutil"
 	"mime"
@@ -21,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kuangcp/logger"
 
 	"github.com/fatih/color"
 )
@@ -61,6 +62,8 @@ var (
 	fourOnly        bool
 	sixOnly         bool
 
+	requestTimeout int
+
 	// number of redirects followed
 	redirectsFollowed int
 
@@ -84,6 +87,8 @@ func init() {
 	flag.StringVar(&clientCertFile, "E", "", "client cert file for tls config")
 	flag.BoolVar(&fourOnly, "4", false, "resolve IPv4 addresses only")
 	flag.BoolVar(&sixOnly, "6", false, "resolve IPv6 addresses only")
+
+	flag.IntVar(&requestTimeout, "m", 10, "Maximum  time  in  seconds  that you allow httpstat's connection to take")
 
 	flag.Usage = usage
 }
@@ -128,16 +133,14 @@ func main() {
 	}
 
 	if (httpMethod == "POST" || httpMethod == "PUT") && postBody == "" {
-		logger.Emer("must supply post body using -d when POST or PUT is used")
+		logger.Fatal("must supply post body using -d when POST or PUT is used")
 	}
 
 	if onlyHeader {
 		httpMethod = "HEAD"
 	}
 
-	url := parseURL(args[0])
-
-	visit(url)
+	visit(parseURL(args[0]))
 }
 
 // readClientCert - helper function to read client certificate
@@ -154,8 +157,7 @@ func readClientCert(filename string) []tls.Certificate {
 	// read client certificate file (must include client private key and certificate)
 	certFileBytes, err := ioutil.ReadFile(filename)
 	if err != nil {
-		logger.Emer("failed to read client certificate file: ", err)
-		os.Exit(1)
+		logger.Fatal("failed to read client certificate file: ", err)
 	}
 
 	for {
@@ -175,8 +177,7 @@ func readClientCert(filename string) []tls.Certificate {
 
 	cert, err := tls.X509KeyPair(certPem, pkeyPem)
 	if err != nil {
-		logger.Emer("unable to load client cert and key pair: ", err)
-		os.Exit(1)
+		logger.Fatal("unable to load client cert and key pair: ", err)
 	}
 	return []tls.Certificate{cert}
 }
@@ -188,8 +189,7 @@ func parseURL(uri string) *url.URL {
 
 	parsedURL, err := url.Parse(uri)
 	if err != nil {
-		logger.Emer("could not parse url %q: %v", uri, err)
-		os.Exit(1)
+		logger.Fatal("could not parse url %q: %v", uri, err)
 	}
 
 	if parsedURL.Scheme == "" {
@@ -204,8 +204,7 @@ func parseURL(uri string) *url.URL {
 func headerKeyValue(h string) (string, string) {
 	i := strings.Index(h, ":")
 	if i == -1 {
-		logger.Emer("Header '%s' has invalid format, missing ':'", h)
-		os.Exit(1)
+		logger.Fatal("Header '%s' has invalid format, missing ':'", h)
 	}
 	return strings.TrimRight(h[:i], " "), strings.TrimLeft(h[i:], " :")
 }
@@ -239,8 +238,9 @@ func visit(url *url.URL) {
 		ConnectDone: func(net, addr string, err error) {
 			// TODO print timeout, also print tree
 			if err != nil {
-				logger.Emer("unable to connect to host %v: %v", addr, err)
-				os.Exit(1)
+				fmt.Printf("     DNS Lookup: %v\n TCP Connection: %v\n", t1.Sub(t0), time.Now().Sub(t1))
+				logger.Error("unable to connect to host %v: %v", addr, err)
+				return
 			}
 			t2 = time.Now()
 
@@ -286,6 +286,7 @@ func visit(url *url.URL) {
 
 	client := &http.Client{
 		Transport: tr,
+		Timeout:   time.Second * time.Duration(requestTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// always refuse to follow redirects, visit does that
 			// manually if required.
@@ -295,8 +296,7 @@ func visit(url *url.URL) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Emer("failed to read response: %v", err)
-		os.Exit(1)
+		logger.Fatal("failed to read response: %v", err)
 	}
 
 	// Print SSL/TLS version which is used for connection
@@ -424,14 +424,12 @@ func visit(url *url.URL) {
 				// 30x but no Location to follow, give up.
 				return
 			}
-			logger.Emer("unable to follow redirect: %v", err)
-			os.Exit(1)
+			logger.Fatal("unable to follow redirect: %v", err)
 		}
 
 		redirectsFollowed++
 		if redirectsFollowed > maxRedirects {
-			logger.Emer("maximum number of redirects (%d) followed", maxRedirects)
-			os.Exit(1)
+			logger.Fatal("maximum number of redirects (%d) followed", maxRedirects)
 		}
 
 		visit(loc)
@@ -445,8 +443,7 @@ func isRedirect(resp *http.Response) bool {
 func newRequest(method string, url *url.URL, body string) *http.Request {
 	req, err := http.NewRequest(method, url.String(), createBody(body))
 	if err != nil {
-		logger.Emer("unable to create request: %v", err)
-		os.Exit(1)
+		logger.Fatal("unable to create request: %v", err)
 	}
 	for _, h := range httpHeaders {
 		k, v := headerKeyValue(h)
@@ -464,8 +461,7 @@ func createBody(body string) io.Reader {
 		filename := body[1:]
 		f, err := os.Open(filename)
 		if err != nil {
-			logger.Emer("failed to open data file %s: %v", filename, err)
-			os.Exit(1)
+			logger.Fatal("failed to open data file %s: %v", filename, err)
 		}
 		return f
 	}
@@ -517,15 +513,13 @@ func readResponseBody(req *http.Request, resp *http.Response) string {
 			}
 
 			if filename == "/" {
-				logger.Emer("No remote filename; specify output filename with -o to save response body")
-				os.Exit(1)
+				logger.Fatal("No remote filename; specify output filename with -o to save response body")
 			}
 		}
 
 		f, err := os.Create(filename)
 		if err != nil {
-			logger.Emer("unable to create file %s: %v", filename, err)
-			os.Exit(1)
+			logger.Fatal("unable to create file %s: %v", filename, err)
 		}
 		defer f.Close()
 		w = f
@@ -533,8 +527,7 @@ func readResponseBody(req *http.Request, resp *http.Response) string {
 	}
 
 	if _, err := io.Copy(w, resp.Body); err != nil && w != ioutil.Discard {
-		logger.Emer("failed to read response body: %v", err)
-		os.Exit(1)
+		logger.Fatal("failed to read response body: %v", err)
 	}
 
 	return msg
